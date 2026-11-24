@@ -46,6 +46,26 @@ local function finder(_opts, ctx)
   return items
 end
 
+--- Re-run the finder and keep the cursor on `path`. A scope change moves the
+--- bookmark to another file, which also changes its position in the list.
+---@param picker table
+---@param path string
+local function refind(picker, path)
+  picker:find({
+    on_done = function()
+      if picker.closed then
+        return
+      end
+      for item, idx in picker:iter() do
+        if item.file == path then
+          picker.list:view(idx)
+          return
+        end
+      end
+    end,
+  })
+end
+
 --- Usable width of the picker's list window, or a sane guess.
 ---@param picker table|nil
 ---@return integer
@@ -136,61 +156,89 @@ function M.source(opts)
   local keys = config.options.picker.keys
 
   local actions = {
-    fsbookmark_edit = function(picker, item)
-      if not item then
-        return
-      end
-      require("fsbookmark.edit").edit(item.bookmark.path, function()
+    fsbookmark_edit = {
+      desc = "Edit bookmark",
+      action = function(picker, item)
+        if not item then
+          return
+        end
+        require("fsbookmark.edit").edit(item.bookmark.path, function()
+          refind(picker, item.bookmark.path)
+        end)
+      end,
+    },
+    fsbookmark_delete = {
+      desc = "Delete bookmark",
+      action = function(picker, item)
+        local selected = picker:selected({ fallback = true })
+        for _, entry in ipairs(selected) do
+          fsbookmark.remove(entry.bookmark.path)
+        end
+        picker.list:set_selected()
         picker:find()
-      end)
-    end,
-    fsbookmark_delete = function(picker, item)
-      local selected = picker:selected({ fallback = true })
-      for _, entry in ipairs(selected) do
-        fsbookmark.remove(entry.bookmark.path)
-      end
-      picker.list:set_selected()
-      picker:find()
-    end,
-    fsbookmark_reload = function(picker)
-      fsbookmark.load()
-      picker:find()
-    end,
-    -- One key toggles between "mine" and "the repository's".
-    fsbookmark_share = function(picker, item)
-      if not item then
-        return
-      end
-      local shared = item.bookmark.scope == "shared"
-      local bookmark, err = (shared and fsbookmark.unshare or fsbookmark.share)(item.bookmark.path)
-      if not bookmark then
-        util.notify(err or "could not change sharing", vim.log.levels.WARN)
-        return
-      end
-      util.notify((shared and "unshared " or "shared ") .. util.display_path(bookmark.path))
-      picker:find()
-    end,
-    fsbookmark_reveal = function(picker, item)
-      if not item then
-        return
-      end
-      picker:close()
-      local bookmark = item.bookmark
-      -- Reveal the file's parent; a bookmarked directory reveals itself.
-      local dir = bookmark.type == "directory" and bookmark.path or vim.fs.dirname(bookmark.path)
-      require("fsbookmark.explorer").open_directory(dir)
-    end,
-    fsbookmark_yank = function(_, item)
-      if not item then
-        return
-      end
-      vim.fn.setreg(vim.v.register or '"', item.bookmark.path)
-      vim.fn.setreg("+", item.bookmark.path)
-      util.notify("copied " .. item.bookmark.path)
-    end,
+      end,
+    },
+    fsbookmark_reload = {
+      desc = "Reload bookmarks",
+      action = function(picker)
+        fsbookmark.load()
+        picker:find()
+      end,
+    },
+    -- One key cycles workspace -> shared -> global. A scope that is not
+    -- available (shared disabled, path outside the root) is skipped.
+    fsbookmark_share = {
+      desc = "Cycle scope",
+      action = function(picker, item)
+        if not item then
+          return
+        end
+        local order = { "workspace", "shared", "global" }
+        local move = { workspace = fsbookmark.unshare, shared = fsbookmark.share, global = fsbookmark.make_global }
+        local from = item.bookmark.scope
+        local start = from == "shared" and 2 or from == "global" and 3 or 1
+        for step = 1, #order - 1 do
+          local target = order[(start + step - 1) % #order + 1]
+          local bookmark = move[target](item.bookmark.path)
+          if bookmark and bookmark.scope == target then
+            util.notify(target .. " " .. util.display_path(bookmark.path))
+            refind(picker, bookmark.path)
+            return
+          end
+        end
+        util.notify("no other scope available for " .. util.display_path(item.bookmark.path), vim.log.levels.WARN)
+      end,
+    },
+    fsbookmark_reveal = {
+      desc = "Show in explorer",
+      action = function(picker, item)
+        if not item then
+          return
+        end
+        picker:close()
+        local bookmark = item.bookmark
+        -- Reveal the file's parent; a bookmarked directory reveals itself.
+        local dir = bookmark.type == "directory" and bookmark.path or vim.fs.dirname(bookmark.path)
+        require("fsbookmark.explorer").open_directory(dir)
+      end,
+    },
+    fsbookmark_yank = {
+      desc = "Copy path",
+      action = function(_, item)
+        if not item then
+          return
+        end
+        vim.fn.setreg(vim.v.register or '"', item.bookmark.path)
+        vim.fn.setreg("+", item.bookmark.path)
+        util.notify("copied " .. item.bookmark.path)
+      end,
+    },
   }
 
-  local input_keys = {}
+  -- Single-letter keys, so they live in the list window only (normal mode);
+  -- the search input keeps every letter for typing. `/` switches between the
+  -- two, as in the Snacks explorer. `?` is Snacks' own help.
+  local list_keys = {}
   local map = {
     edit = "fsbookmark_edit",
     delete = "fsbookmark_delete",
@@ -209,13 +257,16 @@ function M.source(opts)
       local ok, normalised = pcall(function()
         return require("snacks").util.normkey(key)
       end)
-      input_keys[ok and normalised or key] = { action, mode = { "n", "i" } }
+      -- `desc` here is what the `?` help shows; a bare action name would show as-is.
+      list_keys[ok and normalised or key] = { action, desc = actions[action].desc }
     end
   end
 
   local _, workspace_name = fsbookmark.workspace()
 
-  return vim.tbl_deep_extend("force", opts or {}, {
+  -- Start in the list, like the Snacks explorer. Before `opts` so a caller can
+  -- pass `focus = "input"`.
+  return vim.tbl_deep_extend("force", { focus = "list" }, opts or {}, {
     title = workspace_name and ("Bookmarks (%s)"):format(workspace_name) or "Bookmarks",
     -- `live` hands the raw prompt to the finder and keeps the built-in matcher
     -- out of the way; see the comment on `finder`.
@@ -228,8 +279,7 @@ function M.source(opts)
     format = format,
     actions = actions,
     win = {
-      input = { keys = input_keys },
-      list = { keys = input_keys },
+      list = { keys = list_keys },
     },
     confirm = function(picker, item)
       picker:close()

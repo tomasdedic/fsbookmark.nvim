@@ -42,6 +42,15 @@ local subcommands = {
       util.notify(err or "could not unshare", vim.log.levels.WARN)
     end
   end,
+  global = function(args)
+    local bookmark, err = require("fsbookmark").make_global(args[1])
+    local util = require("fsbookmark.util")
+    if bookmark then
+      util.notify("global " .. util.display_path(bookmark.path))
+    else
+      util.notify(err or "could not make global", vim.log.levels.WARN)
+    end
+  end,
   prune = function()
     local removed = require("fsbookmark.watch").prune()
     require("fsbookmark.util").notify(("removed %d broken bookmark(s)"):format(removed))

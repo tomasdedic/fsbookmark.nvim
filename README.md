@@ -98,30 +98,33 @@ exposes named pickers it knows about. `require("fsbookmark").picker()` always wo
 | `<leader>me`  | Edit bookmark    |
 | `<leader>mr`  | Remove bookmark  |
 | `mb`          | Toggle (in an explorer buffer) |
+| `mB`          | Toggle global (in an explorer buffer) |
 
-Also `:FSBookmark {add,remove,toggle,edit,list,share,unshare,prune,save,load} [path]`.
+Both explorer keys also work in the Snacks bookmark picker list.
+
+Also `:FSBookmark {add,remove,toggle,edit,list,share,unshare,global,prune,save,load} [path]`.
 
 ### Picker
+
+The Snacks picker works like the Snacks explorer: it opens with focus on the
+list, `/` (or `i`) moves focus to the search input, and `/` in the input's
+normal mode moves it back. The keys below are active in the list only, so every
+letter can be typed in the search input.
 
 | Key      | Action        |
 | -------- | ------------- |
 | `<CR>`   | Open          |
-| `<C-e>`  | Edit          |
-| `<C-x>`  | Delete        |
-| `<C-l>`  | Reload        |
-| `<C-y>`  | Copy path     |
-| `<C-o>`  | Reveal in explorer |
-| `<C-h>`  | Share / unshare (see below) |
+| `/`      | Search (toggle focus) |
+| `e`      | Edit          |
+| `c`      | Cycle scope: workspace -> shared -> global (see below) |
+| `x`      | Delete (respects multi-selection) |
+| `l`      | Reload        |
+| `y`      | Copy path     |
+| `o`      | Reveal in explorer |
+| `?`      | Snacks key help (all keys) |
 
 Telescope and fzf-lua support `<C-e>` (edit), `<C-x>` (delete) and `<C-y>`
 (copy path).
-
-Snacks already owns `<C-a><C-b><C-c><C-d><C-f><C-g><C-j><C-k><C-n><C-p><C-q>`
-`<C-r><C-s><C-t><C-u><C-v><C-w>` inside the picker, so the obvious `<C-d>` for
-delete and `<C-r>` for reload are not available — binding them makes Snacks log
-a duplicate-mapping warning and shadows its own scroll keys.
-
-`<C-x>` respects multi-selection.
 
 The picker runs as a `live` Snacks source, so the prompt is handed to this
 plugin's own parser rather than to the built-in matcher — `label:core` typed
@@ -176,6 +179,7 @@ fsbookmark.labels()                                                 --> string[]
 fsbookmark.workspace()                                              --> root|nil, name|nil
 fsbookmark.share(path?)                                             --> bookmark|nil, err|nil
 fsbookmark.unshare(path?)                                           --> bookmark|nil, err|nil
+fsbookmark.make_global(path?)                                       --> bookmark|nil, err|nil
 fsbookmark.is_broken(bookmark)                                      --> boolean
 fsbookmark.open(bookmark|path)
 fsbookmark.picker(opts?)
@@ -230,12 +234,12 @@ require("fsbookmark").setup({
   icons = { bookmark = "★", broken = "⚠", global = "🌍", workspace = "📁", shared = "👥" },
   picker = {
     keys = {
-      edit = "<c-e>", delete = "<c-x>", reload = "<c-l>",
-      yank = "<c-y>", reveal = "<c-o>", share = "<c-h>",
+      edit = "e", share = "c", delete = "x", reload = "l",
+      yank = "y", reveal = "o",  -- list window only
     },
     backend = "auto",  -- "snacks" | "telescope" | "fzf-lua"
   },
-  explorer = { enabled = true, key = "mb" },  -- use "b" with the Snacks explorer, where `m` is move
+  explorer = { enabled = true, key = "mb", global_key = "mB" },  -- use "b"/"B" with the Snacks explorer, where `m` is move
   keys = { enabled = true, prefix = "<leader>m" },
   open_directory = nil,  -- fun(path); defaults to Snacks explorer / oil / neo-tree
 })
@@ -262,8 +266,12 @@ picker and `search()` always show global plus the current workspace merged
 together, so bookmarks from *other* projects stay out of your way.
 
 `scope` is derived from the file a bookmark lives in — it is not stored, and
-you never set it. Renaming a file across the root boundary moves it between
-files automatically.
+you do not set it on add. Renaming a file out of the root moves it to
+`global.json` automatically.
+
+To keep a project file in `global.json` (visible in every project), use
+`:FSBookmark global` (adds the bookmark if it is missing), or `c` in the
+picker. A global bookmark stays global when its file is renamed.
 
 Turn the whole thing off with `workspace = { enabled = false }` and everything
 lives in `global.json`.
@@ -293,9 +301,12 @@ personal files; a bookmark moves into the shared file only when you say so:
 ```
 :FSBookmark share      -- promote the current bookmark
 :FSBookmark unshare    -- take it back out
+:FSBookmark global     -- keep it in global.json instead
 ```
 
-or `<C-h>` in the picker, which toggles between the two. That way a personal
+or `c` in the picker, which cycles workspace -> shared -> global.
+Scopes that are not available (shared disabled, path outside the root) are
+skipped. That way a personal
 note can never end up in a commit by accident.
 
 Turn it off with `shared = { enabled = false }`.
@@ -333,6 +344,8 @@ are followed automatically. `:FSBookmark prune` removes all broken ones.
 `require("fsbookmark.explorer").toggle()` bookmarks the path under the cursor.
 It knows how to read the cursor path from the Snacks explorer, neo-tree and oil,
 and falls back to the current buffer's file.
+`require("fsbookmark.explorer").toggle_global()` (`explorer.global_key`) does the
+same for `global.json`: a global bookmark is removed, any other becomes global.
 
 The `★` marker in the Snacks explorer needs the `format` override shown above.
 Snacks has no chaining hook for third-party decorations, so that override is

@@ -8,13 +8,22 @@ M.group = nil
 ---@type table<string, fun(): string|nil>
 M.providers = {}
 
---- Snacks explorer is a picker; the focused item carries the path.
+--- Snacks explorer is a picker; the focused item carries the path. The keys
+--- are mapped in every Snacks list (the bookmark picker too), so prefer the
+--- focused picker over the explorer.
 function M.providers.snacks()
   local ok, Snacks = pcall(require, "snacks")
   if not ok or not Snacks.picker then
     return nil
   end
-  local picker = (Snacks.picker.get({ source = "explorer" }) or {})[1]
+  local picker
+  for _, p in ipairs(Snacks.picker.get()) do
+    if p:is_focused() then
+      picker = p
+      break
+    end
+  end
+  picker = picker or (Snacks.picker.get({ source = "explorer" }) or {})[1]
   if not picker then
     return nil
   end
@@ -86,24 +95,66 @@ function M.toggle()
   local added = fsbookmark.toggle(path)
   local icons = config.options.icons
   util.notify((added and icons.bookmark .. " added " or "removed ") .. util.display_path(path))
-  M.refresh()
+  M.refresh(path)
   return added
 end
 
+--- Toggle a global bookmark for the path under the cursor: a global one is
+--- removed, anything else (missing, workspace, shared) becomes global.
+---@return boolean global true when the path is now a global bookmark
+function M.toggle_global()
+  local fsbookmark = require("fsbookmark")
+  local path = M.current_path()
+  if not path then
+    util.notify("no path under cursor", vim.log.levels.WARN)
+    return false
+  end
+
+  local existing = fsbookmark.get(path)
+  if existing and existing.scope == "global" then
+    fsbookmark.remove(path)
+    util.notify("removed " .. util.display_path(path))
+    M.refresh(path)
+    return false
+  end
+
+  local bookmark, err = fsbookmark.make_global(path)
+  if not bookmark then
+    util.notify(err or "could not make global", vim.log.levels.WARN)
+    return false
+  end
+  util.notify(config.options.icons.global .. " global " .. util.display_path(path))
+  M.refresh(path)
+  return true
+end
+
 --- Ask the focused explorer to redraw so the marker updates.
-function M.refresh()
+---@param path string|nil keep the cursor on this item; a scope change can move
+--- it to another row in the bookmark picker
+function M.refresh(path)
   local ok, Snacks = pcall(require, "snacks")
   if ok and Snacks.picker then
-    for _, picker in ipairs(Snacks.picker.get({ source = "explorer" }) or {}) do
-      -- `list:update()`/`list:render()` reuse the rendered rows, so the
-      -- bookmark marker would not appear until the explorer was reopened.
-      -- Only re-running the finder re-formats the tree — and that resets the
-      -- cursor to the top unless the current position is pinned first, which
-      -- is what Snacks' own explorer actions do around their refreshes.
-      pcall(function()
-        picker.list:set_target()
-        picker:find()
-      end)
+    for _, source in ipairs({ "explorer", "fsbookmark" }) do
+      for _, picker in ipairs(Snacks.picker.get({ source = source }) or {}) do
+        -- `list:update()`/`list:render()` reuse the rendered rows, so the
+        -- bookmark marker would not appear until the explorer was reopened.
+        -- Only re-running the finder re-formats the tree — and that resets the
+        -- cursor to the top unless the current position is pinned first, which
+        -- is what Snacks' own explorer actions do around their refreshes.
+        pcall(function()
+          picker.list:set_target()
+          picker:find({
+            on_done = function()
+              for item, idx in picker:iter() do
+                if path and item.file == path then
+                  picker.list:view(idx)
+                  return
+                end
+              end
+            end,
+          })
+        end)
+      end
     end
   end
 
@@ -157,7 +208,8 @@ end
 --- Register the toggle keymap in explorer buffers.
 function M.setup()
   local key = config.options.explorer.key
-  if not key then
+  local global_key = config.options.explorer.global_key
+  if not key and not global_key then
     return
   end
   if M.group then
@@ -169,11 +221,17 @@ function M.setup()
     group = M.group,
     pattern = { "snacks_picker_list", "neo-tree", "oil" },
     callback = function(args)
-      vim.keymap.set("n", key, M.toggle, {
-        buffer = args.buf,
-        desc = "Toggle bookmark",
-        nowait = true,
-      })
+      if key then
+        vim.keymap.set("n", key, M.toggle, { buffer = args.buf, desc = "Toggle bookmark", nowait = true })
+      end
+      if global_key then
+        vim.keymap.set(
+          "n",
+          global_key,
+          M.toggle_global,
+          { buffer = args.buf, desc = "Toggle global bookmark", nowait = true }
+        )
+      end
     end,
   })
 end

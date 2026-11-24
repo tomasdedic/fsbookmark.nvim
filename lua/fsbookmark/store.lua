@@ -446,8 +446,8 @@ function M.move(path, scope)
   if not M.file(scope) then
     return nil, ("no %s file available here"):format(scope)
   end
-  -- A checked-in file can only describe paths inside the repository.
-  if scope == "shared" and not root.contains(path, M.collections.shared.root or "") then
+  -- Only global can hold any path; the other two describe the repository.
+  if scope ~= "global" and not root.contains(path, M.collections.workspace.root or "") then
     return nil, "outside the workspace: " .. util.display_path(path)
   end
 
@@ -481,7 +481,9 @@ function M.rekey(from, to)
   end
 
   local was = bookmark.scope
-  local now = M.scope_for(to)
+  -- Global holds any path, so it stays put; the others fall back to global
+  -- only when the file leaves the root.
+  local now = (was == "global" or M.scope_for(to) == "global") and "global" or was
   if was ~= now then
     for i, item in ipairs(M.collections[was].items) do
       if item.path == from then
