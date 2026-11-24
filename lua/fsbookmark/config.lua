@@ -44,20 +44,17 @@ local defaults = {
     ---@type "auto"|"snacks"|"telescope"|"fzf-lua"
     backend = "auto",
 
-    -- Snacks picker keymaps. Set a value to false to disable it.
-    --
-    -- Snacks already binds <c-a><c-b><c-c><c-d><c-f><c-g><c-j><c-k><c-n>
-    -- <c-p><c-q><c-r><c-s><c-t><c-u><c-v><c-w>; reusing one of those makes
-    -- Snacks log a duplicate-mapping warning and shadows its own action.
-    -- That rules out the otherwise obvious <c-d> for delete and <c-r> for
-    -- reload, which are its scroll and register keys.
+    -- Snacks picker keymaps, in the list window (normal mode) only. The picker
+    -- opens with focus on the list, like the Snacks explorer; `/` or `i`
+    -- moves focus to the search input. `?` is Snacks' help. Set a value to
+    -- false to disable it.
     keys = {
-      edit = "<c-e>",
-      delete = "<c-x>",
-      reload = "<c-l>",
-      yank = "<c-y>",
-      reveal = "<c-o>",
-      share = "<c-h>",
+      edit = "e",
+      share = "c", -- cycle scope: workspace -> shared -> global
+      delete = "x",
+      reload = "l",
+      yank = "y",
+      reveal = "o",
     },
   },
 
@@ -65,6 +62,8 @@ local defaults = {
     -- Register the toggle keymap in supported explorer buffers.
     enabled = true,
     key = "mb",
+    -- Toggle a global bookmark for the path under the cursor. false disables it.
+    global_key = "mB",
   },
 
   keys = {

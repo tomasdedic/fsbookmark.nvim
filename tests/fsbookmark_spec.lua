@@ -261,6 +261,16 @@ describe("picker source", function()
     assert.is_true(source.show_empty)
   end)
 
+  it("maps single-letter keys in the list and leaves ? to Snacks", function()
+    local source = require("fsbookmark.picker").source()
+    assert.equals("list", source.focus)
+    assert.is_nil(source.win.input)
+    assert.is_nil(source.win.list.keys["?"])
+    assert.equals("fsbookmark_share", source.win.list.keys["c"][1])
+    assert.equals("Cycle scope", source.win.list.keys["c"].desc)
+    assert.equals("Edit bookmark", source.actions.fsbookmark_edit.desc)
+  end)
+
   it("routes the prompt through fsbookmark.search", function()
     assert.equals(2, #find(""))
     local found = find("Design")
@@ -584,6 +594,35 @@ describe("shared bookmarks", function()
     assert.equals("shared", fsbookmark.get(inside).scope)
   end)
 
+  it("make_global keeps a workspace path in global.json, also across renames", function()
+    local bookmark = fsbookmark.make_global(inside)
+    assert.equals("global", bookmark.scope)
+    local global = vim.json.decode(table.concat(vim.fn.readfile(store.file("global")), "\n"))
+    assert.equals(inside, global.bookmarks[1].path)
+
+    local moved = ws_root .. "/src/moved.py"
+    require("fsbookmark.watch").on_rename(inside, moved)
+    assert.equals("global", fsbookmark.get(moved).scope)
+  end)
+
+  it("cycles workspace -> shared -> global -> workspace with the picker key", function()
+    local cycle = require("fsbookmark.picker").source().actions.fsbookmark_share.action
+    local picker = { find = function() end }
+    local function step(path)
+      cycle(picker, { bookmark = fsbookmark.get(path) })
+      return fsbookmark.get(path).scope
+    end
+
+    fsbookmark.add(inside)
+    assert.equals("shared", step(inside))
+    assert.equals("global", step(inside))
+    assert.equals("workspace", step(inside))
+
+    -- Outside the root only global is possible.
+    fsbookmark.add(outside)
+    assert.equals("global", step(outside))
+  end)
+
   it("can be turned off", function()
     fsbookmark.setup({
       dir = tmpdir .. "/bookmarks",
@@ -689,6 +728,16 @@ describe("explorer", function()
   it("falls back to the current buffer outside an explorer", function()
     vim.cmd.edit(file_a)
     assert.equals(file_a, require("fsbookmark.explorer").current_path())
+    vim.cmd("silent! %bwipeout!")
+  end)
+
+  it("toggle_global adds the path under the cursor as global, then removes it", function()
+    vim.cmd.edit(file_a)
+    local explorer = require("fsbookmark.explorer")
+    assert.is_true(explorer.toggle_global())
+    assert.equals("global", fsbookmark.get(file_a).scope)
+    assert.is_false(explorer.toggle_global())
+    assert.is_nil(fsbookmark.get(file_a))
     vim.cmd("silent! %bwipeout!")
   end)
 

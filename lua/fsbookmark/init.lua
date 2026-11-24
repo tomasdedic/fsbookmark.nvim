@@ -143,18 +143,17 @@ function M.update(path, data)
   return bookmark
 end
 
---- Promote a bookmark into the repository's checked-in file, so it ships with
---- the project. Nothing moves here implicitly — this is the only way in.
----@param path string|nil defaults to the current buffer
+---@param path string|nil
+---@param scope "global"|"workspace"|"shared"
 ---@return Bookmark|nil bookmark, string|nil error
-function M.share(path)
+local function move(path, scope)
   store.ensure()
   path = M.resolve(path)
   if not path then
     return nil, "no path"
   end
 
-  local bookmark, err = store.move(path, "shared")
+  local bookmark, err = store.move(path, scope)
   if not bookmark then
     return nil, err
   end
@@ -163,23 +162,30 @@ function M.share(path)
   return bookmark, nil
 end
 
+--- Promote a bookmark into the repository's checked-in file, so it ships with
+--- the project. Nothing moves here implicitly — this is the only way in.
+---@param path string|nil defaults to the current buffer
+---@return Bookmark|nil bookmark, string|nil error
+function M.share(path)
+  return move(path, "shared")
+end
+
 --- Move a shared bookmark back into your personal files.
 ---@param path string|nil defaults to the current buffer
 ---@return Bookmark|nil bookmark, string|nil error
 function M.unshare(path)
   store.ensure()
   path = M.resolve(path)
-  if not path then
-    return nil, "no path"
-  end
+  return move(path, path and store.scope_for(path) or "global")
+end
 
-  local bookmark, err = store.move(path, store.scope_for(path))
-  if not bookmark then
-    return nil, err
-  end
-  store.save()
-  events.emit(events.UPDATE, bookmark)
-  return bookmark, nil
+--- Keep a bookmark in global.json, so every project shows it, even when the
+--- path is inside the current workspace. Adds the bookmark if it is missing.
+---@param path string|nil defaults to the current buffer
+---@return Bookmark|nil bookmark, string|nil error
+function M.make_global(path)
+  M.add(path)
+  return move(path, "global")
 end
 
 --- The current workspace, or nil when there is none. Informational only —
